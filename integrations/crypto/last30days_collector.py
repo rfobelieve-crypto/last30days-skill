@@ -35,52 +35,18 @@ Wire into the crypto pipeline by registering an instance in the COLLECTORS table
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import subprocess
 import sys
-from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
+# RawItem / Collector are defined once in pipeline_types so every collector and
+# the pgvector store agree on one schema. Re-exported here for back-compat.
+from pipeline_types import Collector, RawItem  # noqa: F401
+
 log = logging.getLogger("collector.last30days")
-
-# --------------------------------------------------------------------------- #
-# Minimal stand-ins for the crypto system's own types. In the real codebase,
-# import RawItem / Collector from the pipeline package and delete these.
-# --------------------------------------------------------------------------- #
-
-
-@dataclass
-class RawItem:
-    """One normalized signal row, pre-filtering. Mirrors the crypto spec."""
-
-    source: str  # e.g. "l30d:reddit", "l30d:polymarket"
-    source_type: str  # "social" | "prediction" | "dev"
-    title: str
-    url: str
-    raw_payload: dict[str, Any] = field(default_factory=dict)
-    content_text: str = ""
-    published_at: datetime | None = None
-    external_id: str | None = None
-    content_hash: str = ""
-
-    def __post_init__(self) -> None:
-        if not self.content_hash:
-            basis = f"{(self.url or '').strip().lower()}|{(self.title or '').strip().lower()}"
-            self.content_hash = hashlib.sha256(basis.encode("utf-8")).hexdigest()
-
-
-class Collector:
-    """Pluggable collector interface (subset of the crypto system's base)."""
-
-    source: str = ""
-    source_type: str = ""
-    enabled: bool = True
-
-    def fetch(self) -> list[RawItem]:  # pragma: no cover - interface
-        raise NotImplementedError
 
 
 # --------------------------------------------------------------------------- #

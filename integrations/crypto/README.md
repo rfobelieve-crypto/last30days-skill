@@ -12,8 +12,27 @@ keep your existing collectors for those.
 
 | File | Purpose |
 |---|---|
+| `pipeline_types.py` | Shared `RawItem` / `Collector` types (single source of truth) |
 | `last30days_collector.py` | The `Last30DaysCollector` adapter + standalone smoke test |
-| `test_..._collector.py` (in `tests/`) | 21 unit + 1 end-to-end test |
+| `pgvector_store.py` | `PgVectorStore` — Postgres + pgvector persistence with content_hash dedup |
+| `telegram.py` | `TelegramNotifier` (push alerts) + `TelegramChannelCollector` (pull channels) |
+| `tests/test_last30days_collector.py` | 21 unit + 1 end-to-end test |
+| `tests/test_crypto_store_telegram.py` | 21 store + telegram tests (no DB, no network) |
+
+### How they fit together
+
+```
+collectors ──► RawItem[] ──► PgVectorStore.upsert_items()  ──► Postgres+pgvector
+  Last30DaysCollector          (dedup on content_hash)            (raw_items table)
+  TelegramChannelCollector                                              │
+                                                            P1/P2/P3 Claude filter
+                                                                        │
+                                                          TelegramNotifier.send()  ──► Telegram
+```
+
+**Swapping in your real pipeline:** every module imports `RawItem` / `Collector`
+from `pipeline_types.py`. Replace that one file's contents with re-exports from
+your pipeline package and the rest follows.
 
 ## Prerequisites
 
@@ -88,6 +107,49 @@ python3 skills/last30days/scripts/briefing.py generate --weekly
 
 Once your Postgres+pgvector pipeline is ready, demote last30days back to just a
 collector and move scheduling/filtering/storage into your own stack.
+
+## Persisting to Postgres + pgvector
+
+```python
+from pgvector_store import PgVectorStore
+
+store = PgVectorStore(dsn="postgresql://user@localhost/crypto", embed_dim=1024)
+store.init_schema()                       # creates raw_items + indexes (idempotent)
+new_count = store.upsert_items(items)     # ON CONFLICT (content_hash) DO NOTHING
+```
+
+- Dedup is automatic on `content_hash`; re-running a collector inserts only new rows.
+- Embeddings are optional and pluggable. Anthropic has no embedding endpoint, so use
+  Voyage (Anthropic-recommended) or any provider — just pass a callable:
+  ```python
+  store = PgVectorStore(dsn=..., embed_dim=1024,
+                        embed_fn=lambda texts: voyage.embed(texts, model="voyage-3").embeddings)
+  ```
+  Leave `embed_fn` unset to store rows now and backfill embeddings later.
+- Needs `pip install "psycopg[binary]"` for real DB use (imported lazily — tests
+  and the offline demo need neither psycopg nor a database).
+
+## Telegram (both directions)
+
+last30days has **no** Telegram source, so this is additive.
+
+**Pull crypto channels as a collector** (register alongside `Last30DaysCollector`):
+```python
+from telegram import TelegramChannelCollector
+TelegramChannelCollector(
+    channels=["whale_alert", "WatcherGuru", "DeFi_Alpha"],
+    api_id=..., api_hash=..., session="crypto_research", lookback_days=30,
+).fetch()   # -> social RawItems
+```
+Needs Telethon (`pip install telethon`) + `api_id`/`api_hash` from my.telegram.org.
+First run prompts for phone + login code to create the session file.
+
+**Push alerts / digests out** (stdlib only, no deps):
+```python
+from telegram import TelegramNotifier
+TelegramNotifier(bot_token=..., chat_id=...).send("*Daily digest*\n- ...")
+```
+Bot token from @BotFather; messages auto-chunk to Telegram's 4096-char limit.
 
 ## Modes at a glance
 
