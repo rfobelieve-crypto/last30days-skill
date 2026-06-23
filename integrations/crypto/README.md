@@ -14,6 +14,7 @@ keep your existing collectors for those.
 |---|---|
 | `pipeline_types.py` | Shared `RawItem` / `Collector` types (single source of truth) |
 | `last30days_collector.py` | The `Last30DaysCollector` adapter + standalone smoke test |
+| `web3_quant_digest.py` | Two-track (Web3 + Quant) daily digest → Telegram (the lean, no-DB path) |
 | `pgvector_store.py` | `PgVectorStore` — Postgres + pgvector persistence with content_hash dedup |
 | `telegram.py` | `TelegramNotifier` (push alerts) + `TelegramChannelCollector` (pull channels) |
 | `tests/test_last30days_collector.py` | 21 unit + 1 end-to-end test |
@@ -107,6 +108,40 @@ python3 skills/last30days/scripts/briefing.py generate --weekly
 
 Once your Postgres+pgvector pipeline is ready, demote last30days back to just a
 collector and move scheduling/filtering/storage into your own stack.
+
+## Lean path: Web3 + Quant daily digest (no database)
+
+For the "quickly know what's new" goal, skip the DB entirely. `web3_quant_digest.py`
+runs two tuned tracks through the engine, ranks findings, and pushes a Markdown
+digest to Telegram.
+
+```bash
+# Offline smoke test (engine mock fixtures, prints instead of sending):
+python3 web3_quant_digest.py --dry-run --mock
+
+# Live dry run (real engine, prints digest, no Telegram):
+python3 web3_quant_digest.py --dry-run
+
+# Real run -> Telegram:
+TG_BOT_TOKEN=... TG_CHAT_ID=... python3 web3_quant_digest.py
+
+# One track only:
+python3 web3_quant_digest.py --track quant
+```
+
+Track tuning (`WEB3` / `QUANT` constants in the file):
+- **Web3** keeps `polymarket` (prediction-market odds) + `github` (dev activity).
+- **Quant** drops polymarket and targets `--subreddits algotrading,quant,quantfinance`.
+
+Edit the `topics` lists to match what you follow. Cron for 08:00 daily:
+
+```cron
+0 8 * * *  cd /path/to/repo && TG_BOT_TOKEN=xxx TG_CHAT_ID=yyy \
+           /usr/bin/python3.12 integrations/crypto/web3_quant_digest.py >> /var/log/digest.log 2>&1
+```
+
+Graduate to the Postgres+pgvector path below only when you want cross-week dedup,
+semantic search over the archive, or trend-over-time analysis.
 
 ## Persisting to Postgres + pgvector
 

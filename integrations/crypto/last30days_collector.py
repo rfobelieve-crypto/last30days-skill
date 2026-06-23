@@ -124,6 +124,7 @@ class Last30DaysCollector(Collector):
         quick: bool = True,
         timeout: int = 300,
         python_bin: str = sys.executable,
+        extra_args: tuple[str, ...] = (),
         mock: bool = False,
     ) -> None:
         if mode not in {"ranked", "raw"}:
@@ -135,6 +136,7 @@ class Last30DaysCollector(Collector):
         self.quick = quick
         self.timeout = timeout
         self.python_bin = python_bin
+        self.extra_args = extra_args  # passthrough engine flags, e.g. --subreddits
         self.mock = mock
 
     # -- public API -------------------------------------------------------- #
@@ -173,6 +175,7 @@ class Last30DaysCollector(Collector):
             cmd += ["--search", ",".join(self.sources)]
         if self.quick:
             cmd.append("--quick")
+        cmd += list(self.extra_args)
         if self.mock:
             cmd.append("--mock")
         proc = subprocess.run(
